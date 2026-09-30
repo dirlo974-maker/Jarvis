@@ -368,7 +368,7 @@ body.typing .timeline,body.typing .state{display:none}
 
 <script>
 "use strict";
-const VERSION = "2.2";
+const VERSION = "2.3";
 const $ = s => document.querySelector(s);
 const log = document.getElementById("log");
 const pad = n => String(n).padStart(2,"0");
@@ -949,7 +949,7 @@ async function callGemini(contents, model){
       const em = (j.error && j.error.message) || "", st = (j.error && j.error.status) || "";
       const err = new Error(/API key|API_KEY/i.test(em) ? "clé Gemini refusée, vérifiez-la dans les Réglages"
         : r.status === 429 ? "limite gratuite de Gemini atteinte, réessayez dans une minute"
-        : r.status >= 500 ? "le service Gemini est surchargé, réessayez"
+        : r.status >= 500 ? "Gemini est saturé en ce moment, réessayez dans quelques minutes ("+r.status+(em ? " : "+em.slice(0,80) : "")+")"
         : em || ("erreur "+r.status));
       err.status = r.status; err.gstatus = st;
       throw err;
@@ -958,18 +958,35 @@ async function callGemini(contents, model){
   }catch(e){ if (e.status) throw e; throw netError(e); }
   finally{ clearTimeout(timer); apiCtl = null; }
 }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Réessaie automatiquement puis change de modèle si Gemini est saturé.
+async function geminiWithFallback(contents){
+  const first = S.gmodel || "gemini-2.5-flash";
+  const chain = [first, "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"].filter((m, i, a) => a.indexOf(m) === i);
+  let lastErr;
+  for (let i = 0; i < chain.length; i++){
+    for (let attempt = 0; attempt < 2; attempt++){
+      try{
+        const j = await callGemini(contents, chain[i]);
+        if (i > 0) live("(réponse de secours : "+chain[i]+")", false);
+        return j;
+      }catch(e){
+        lastErr = e;
+        const retryable = e.status === 503 || e.status === 500 || e.status === 429 || e.status === 504;
+        if (e.status === 404) break;                // modèle inconnu : on passe au suivant
+        if (!retryable) throw e;                    // clé refusée, etc. : inutile d'insister
+        if (attempt === 0 && e.status !== 429) await sleep(1200 + Math.random()*800); else break;
+      }
+    }
+  }
+  throw lastErr;
+}
 async function runGemini(q, onText){
   const contents = history.map(m => ({ role: m.role === "assistant" ? "model" : "user", parts:[{ text:m.content }] }))
     .concat([{ role:"user", parts:[{ text:q }] }]);
-  let model = S.gmodel || "gemini-2.5-flash", final = "";
+  let final = "";
   for (let round = 0; round < 4; round++){
-    let j;
-    try{ j = await callGemini(contents, model); }
-    catch(e){
-      // Modèle retiré ou renommé : on bascule sur l'alias toujours à jour.
-      if (e.status === 404 && model !== "gemini-flash-latest"){ model = "gemini-flash-latest"; j = await callGemini(contents, model); }
-      else throw e;
-    }
+    const j = await geminiWithFallback(contents);
     const cand = j.candidates && j.candidates[0];
     if (!cand || !cand.content){
       if (j.promptFeedback && j.promptFeedback.blockReason) throw new Error("question refusée par le filtre de Gemini");
