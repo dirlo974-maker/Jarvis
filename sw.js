@@ -1,5 +1,5 @@
 // Jarvis — service worker : garde l'interface disponible même hors connexion.
-const VERSION = "jarvis-v3";
+const VERSION = "jarvis-v4";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", e => {

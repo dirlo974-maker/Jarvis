@@ -300,14 +300,34 @@ body.typing .timeline,body.typing .state{display:none}
       <div class="help">Jarvis s'en sert pour personnaliser ses réponses.</div>
     </div>
 
-    <div class="sec-title">Intelligence (Claude)</div>
+    <div class="sec-title">Intelligence</div>
     <div class="field">
+      <label for="s-provider">Fournisseur</label>
+      <select id="s-provider">
+        <option value="gemini">Google Gemini (gratuit)</option>
+        <option value="claude">Claude d'Anthropic (payant)</option>
+      </select>
+    </div>
+    <div class="field" data-for="gemini">
+      <label for="s-gkey">Clé API Gemini</label>
+      <input id="s-gkey" type="password" autocomplete="off" placeholder="AIza…">
+      <div class="help">Gratuite sur aistudio.google.com → Get API key. Elle reste uniquement sur cet iPhone.</div>
+    </div>
+    <div class="field" data-for="gemini">
+      <label for="s-gmodel">Modèle Gemini</label>
+      <select id="s-gmodel">
+        <option value="gemini-2.5-flash">Gemini Flash (recommandé)</option>
+        <option value="gemini-flash-latest">Gemini Flash, dernière version</option>
+        <option value="gemini-2.5-flash-lite">Gemini Flash-Lite (plus rapide)</option>
+      </select>
+    </div>
+    <div class="field" data-for="claude">
       <label for="s-key">Clé API Anthropic</label>
       <input id="s-key" type="password" autocomplete="off" placeholder="sk-ant-…">
-      <div class="help">Créée sur console.anthropic.com → API Keys. Elle reste uniquement sur cet iPhone.</div>
+      <div class="help">Créée sur console.anthropic.com → API Keys, avec du crédit acheté dans Billing.</div>
     </div>
-    <div class="field">
-      <label for="s-model">Modèle</label>
+    <div class="field" data-for="claude">
+      <label for="s-model">Modèle Claude</label>
       <select id="s-model">
         <option value="claude-haiku-4-5-20251001">Rapide et économique (Haiku)</option>
         <option value="claude-sonnet-5">Plus intelligent (Sonnet)</option>
@@ -348,7 +368,7 @@ body.typing .timeline,body.typing .state{display:none}
 
 <script>
 "use strict";
-const VERSION = "2.1";
+const VERSION = "2.2";
 const $ = s => document.querySelector(s);
 const log = document.getElementById("log");
 const pad = n => String(n).padStart(2,"0");
@@ -396,7 +416,7 @@ function showTab(name){
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.pane)));
 
 /* ============ Réglages ============ */
-const DEFAULTS = { name:"Paul", about:"", key:"", model:"claude-haiku-4-5-20251001", cal:"", secret:"", voice:"", speak:"1" };
+const DEFAULTS = { name:"Paul", about:"", provider:"gemini", gkey:"", gmodel:"gemini-2.5-flash", key:"", model:"claude-haiku-4-5-20251001", cal:"", secret:"", voice:"", speak:"1" };
 let S = Object.assign({}, DEFAULTS, store.get("settings", {}));
 const isStandalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 if (!isStandalone && /iPhone|iPad/.test(navigator.userAgent)) $("#installHint").hidden = false;
@@ -404,12 +424,14 @@ $("#ver").textContent = "Jarvis v"+VERSION+(isStandalone ? " · mode app" : " ·
 
 function openSettings(){
   $("#s-name").value = S.name; $("#s-about").value = S.about; $("#s-key").value = S.key;
+  $("#s-provider").value = S.provider; $("#s-gkey").value = S.gkey; $("#s-gmodel").value = S.gmodel; showProviderFields();
   $("#s-model").value = S.model; $("#s-cal").value = S.cal; $("#s-secret").value = S.secret;
   $("#s-speak").value = S.speak; fillVoices(); $("#s-voice").value = S.voice;
   $("#settingsMsg").textContent = ""; $("#sheet").hidden = false;
 }
 function readSettings(){
   return { name: $("#s-name").value.trim() || "Paul", about: $("#s-about").value.trim(), key: $("#s-key").value.trim(),
+    provider: $("#s-provider").value, gkey: $("#s-gkey").value.trim(), gmodel: $("#s-gmodel").value,
     model: $("#s-model").value, cal: $("#s-cal").value.trim(), secret: $("#s-secret").value.trim(),
     voice: $("#s-voice").value, speak: $("#s-speak").value };
 }
@@ -428,9 +450,12 @@ $("#testCal").onclick = async () => {
   catch(e){ $("#settingsMsg").textContent = "Échec : "+e.message; }
 };
 $("#clearChat").onclick = () => { history = []; store.set("history", []); log.innerHTML = ""; $("#settingsMsg").textContent = "Conversation effacée."; };
+function showProviderFields(){ const v = $("#s-provider").value; document.querySelectorAll("[data-for]").forEach(f => { f.hidden = f.dataset.for !== v; }); }
+$("#s-provider").addEventListener("change", showProviderFields);
 function paintBrain(){
-  $("#dot").classList.toggle("off", !S.key);
-  $("#sysState").textContent = S.key ? (S.model.includes("haiku") ? "en ligne · haiku" : "en ligne · sonnet") : "configuration requise";
+  const ok = hasAI();
+  $("#dot").classList.toggle("off", !ok);
+  $("#sysState").textContent = !ok ? "configuration requise" : S.provider === "gemini" ? "en ligne · gemini" : (S.model.includes("haiku") ? "en ligne · haiku" : "en ligne · sonnet");
 }
 paintBrain();
 
@@ -862,6 +887,10 @@ function resetState(){
   $("#sendBtn").disabled = false;
   if (mode === "think") setMode("idle");
 }
+function netError(e){ return new Error(e.name === "AbortError" ? "pas de réponse (connexion lente ?)" : e.message === "Load failed" || e.message === "Failed to fetch" ? "pas de connexion internet" : e.message); }
+function hasAI(){ return S.provider === "gemini" ? !!S.gkey : !!S.key; }
+
+/* ---- Claude (payant) ---- */
 async function callClaude(msgs){
   apiCtl = new AbortController();
   const timer = setTimeout(() => apiCtl && apiCtl.abort(), 45000);
@@ -874,34 +903,100 @@ async function callClaude(msgs){
     let j = {}; try{ j = await r.json(); }catch{}
     if (!r.ok){
       const em = (j.error && j.error.message) || "";
-      throw new Error(r.status === 401 ? "clé API refusée, vérifiez-la dans les Réglages"
+      throw new Error(r.status === 401 ? "clé Claude refusée, vérifiez-la dans les Réglages"
         : r.status === 429 ? "trop de demandes, réessayez dans un instant"
-        : /credit/i.test(em) ? "crédit API épuisé sur console.anthropic.com"
+        : /credit/i.test(em) ? "crédit API épuisé sur console.anthropic.com (ou passez sur Gemini gratuit dans les Réglages)"
         : r.status === 529 || r.status >= 500 ? "le service Claude est surchargé, réessayez"
         : em || ("erreur "+r.status));
     }
     return j;
-  }catch(e){
-    throw new Error(e.name === "AbortError" ? "pas de réponse (connexion lente ?)" : e.message === "Load failed" || e.message === "Failed to fetch" ? "pas de connexion internet" : e.message);
-  }finally{ clearTimeout(timer); apiCtl = null; }
+  }catch(e){ throw netError(e); }
+  finally{ clearTimeout(timer); apiCtl = null; }
 }
-async function askClaude(q){
-  if (!S.key){ const m = "Il me manque la clé API pour réfléchir. Ouvrez les Réglages pour l'ajouter. En attendant : « minuteur 10 », « note : … », « agenda » et « heure » fonctionnent."; addMsg("jarvis", m); live(m); return; }
+async function runClaude(q, onText){
+  const msgs = history.concat([{ role:"user", content:q }]);
+  let final = "";
+  for (let round = 0; round < 4; round++){
+    const j = await callClaude(msgs);
+    const content = Array.isArray(j.content) ? j.content : [];
+    const text = content.filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+    if (text){ final = (final ? final+"\n" : "") + text; onText(final); }
+    const uses = content.filter(b => b.type === "tool_use");
+    if (j.stop_reason !== "tool_use" || !uses.length) break;
+    msgs.push({ role:"assistant", content });
+    msgs.push({ role:"user", content: uses.map(u => ({ type:"tool_result", tool_use_id:u.id, content:String(runTool(u.name, u.input||{})) })) });
+  }
+  return final;
+}
+
+/* ---- Gemini (gratuit) ---- */
+const GTOOLS = TOOLS.map(t => {
+  const f = { name:t.name, description:t.description };
+  if (t.input_schema && t.input_schema.properties && Object.keys(t.input_schema.properties).length) f.parameters = t.input_schema;
+  return f;
+});
+async function callGemini(contents, model){
+  apiCtl = new AbortController();
+  const timer = setTimeout(() => apiCtl && apiCtl.abort(), 45000);
+  try{
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent", {
+      method:"POST", signal:apiCtl.signal,
+      headers:{ "content-type":"application/json", "x-goog-api-key":S.gkey },
+      body: JSON.stringify({ systemInstruction:{ parts:[{ text:systemPrompt() }] }, contents, tools:[{ functionDeclarations:GTOOLS }], generationConfig:{ maxOutputTokens:2048, temperature:0.7 } })
+    });
+    let j = {}; try{ j = await r.json(); }catch{}
+    if (!r.ok){
+      const em = (j.error && j.error.message) || "", st = (j.error && j.error.status) || "";
+      const err = new Error(/API key|API_KEY/i.test(em) ? "clé Gemini refusée, vérifiez-la dans les Réglages"
+        : r.status === 429 ? "limite gratuite de Gemini atteinte, réessayez dans une minute"
+        : r.status >= 500 ? "le service Gemini est surchargé, réessayez"
+        : em || ("erreur "+r.status));
+      err.status = r.status; err.gstatus = st;
+      throw err;
+    }
+    return j;
+  }catch(e){ if (e.status) throw e; throw netError(e); }
+  finally{ clearTimeout(timer); apiCtl = null; }
+}
+async function runGemini(q, onText){
+  const contents = history.map(m => ({ role: m.role === "assistant" ? "model" : "user", parts:[{ text:m.content }] }))
+    .concat([{ role:"user", parts:[{ text:q }] }]);
+  let model = S.gmodel || "gemini-2.5-flash", final = "";
+  for (let round = 0; round < 4; round++){
+    let j;
+    try{ j = await callGemini(contents, model); }
+    catch(e){
+      // Modèle retiré ou renommé : on bascule sur l'alias toujours à jour.
+      if (e.status === 404 && model !== "gemini-flash-latest"){ model = "gemini-flash-latest"; j = await callGemini(contents, model); }
+      else throw e;
+    }
+    const cand = j.candidates && j.candidates[0];
+    if (!cand || !cand.content){
+      if (j.promptFeedback && j.promptFeedback.blockReason) throw new Error("question refusée par le filtre de Gemini");
+      break;
+    }
+    const parts = cand.content.parts || [];
+    const text = parts.filter(p => p.text && !p.thought).map(p => p.text).join("").trim();
+    if (text){ final = (final ? final+"\n" : "") + text; onText(final); }
+    const calls = parts.filter(p => p.functionCall);
+    if (!calls.length) break;
+    contents.push(cand.content);
+    contents.push({ role:"user", parts: calls.map(p => ({ functionResponse:{ name:p.functionCall.name, response:{ result:String(runTool(p.functionCall.name, p.functionCall.args||{})) } } })) });
+  }
+  return final;
+}
+
+/* ---- Aiguillage ---- */
+async function askAI(q){
+  if (!hasAI()){
+    const m = "Il me manque une clé pour réfléchir. Ouvrez les Réglages : la clé Gemini est gratuite. En attendant : « minuteur 10 », « note : … », « agenda » et « heure » fonctionnent.";
+    addMsg("jarvis", m); live(m); return;
+  }
   const bubble = addMsg("jarvis", "…");
   busy = true; setMode("think", 90000); $("#sendBtn").disabled = true; live("…");
-  const msgs = history.concat([{ role:"user", content:q }]);
   try{
-    let final = "";
-    for (let round = 0; round < 4; round++){
-      const j = await callClaude(msgs);
-      const content = Array.isArray(j.content) ? j.content : [];
-      const text = content.filter(b => b.type === "text").map(b => b.text).join("\n").trim();
-      if (text){ final = (final ? final+"\n" : "") + text; bubble.textContent = final; scrollChat(); }
-      const uses = content.filter(b => b.type === "tool_use");
-      if (j.stop_reason !== "tool_use" || !uses.length) break;
-      msgs.push({ role:"assistant", content });
-      msgs.push({ role:"user", content: uses.map(u => ({ type:"tool_result", tool_use_id:u.id, content:String(runTool(u.name, u.input||{})) })) });
-    }
+    const onText = t => { bubble.textContent = t; scrollChat(); };
+    let final = S.provider === "gemini" ? await runGemini(q, onText) : await runClaude(q, onText);
     if (!final) final = "C'est fait.";
     bubble.textContent = final; live(final, false);
     history = cleanHistory(history.concat([{ role:"user", content:q }, { role:"assistant", content:final }]));
@@ -921,13 +1016,13 @@ async function handle(q){
   addMsg("you", q); $("#q").value = "";
   const r = local(q);
   if (r){ addMsg("jarvis", r); live(r, false); say(r); return; }
-  await askClaude(q);
+  await askAI(q);
 }
 $("#ask").addEventListener("submit", e => { e.preventDefault(); const v = $("#q").value; $("#q").blur(); handle(v); });
 
 /* ============ Démarrage ============ */
 showTab(store.get("tab", "chat"));
-if (!S.key && !S.cal) addMsg("jarvis", "Bonjour "+S.name+". Pour me mettre en service, ouvrez les Réglages en haut à droite : ajoutez la clé API et l'adresse du pont agenda.");
+if (!hasAI() && !S.cal) addMsg("jarvis", "Bonjour "+S.name+". Pour me mettre en service, ouvrez les Réglages en haut à droite : ajoutez une clé Gemini (gratuite) et l'adresse du pont agenda.");
 else addMsg("jarvis", (new Date().getHours() < 18 ? "Bonjour " : "Bonsoir ")+S.name+". Touchez le cœur lumineux ou le micro pour me parler.");
 if ("serviceWorker" in navigator){
   navigator.serviceWorker.register("sw.js").then(reg => { reg.update().catch(() => {}); }).catch(() => {});
