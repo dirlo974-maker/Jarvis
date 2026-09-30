@@ -38,8 +38,7 @@
   --mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --sat:env(safe-area-inset-top,0px);
   --sab:env(safe-area-inset-bottom,0px);
-  --app-h:100dvh;
-}
+  }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
 body{position:fixed;inset:0;background:var(--ground);color:var(--text);font-family:var(--body);font-size:15px;
@@ -63,7 +62,7 @@ body[data-mode="speak"] .aurora i:nth-child(1){opacity:.7}
   background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
   background-size:36px 36px;-webkit-mask-image:radial-gradient(80% 60% at 50% 40%,#000 20%,transparent 80%);mask-image:radial-gradient(80% 60% at 50% 40%,#000 20%,transparent 80%)}
 
-.app{position:fixed;left:0;right:0;top:0;height:var(--app-h);z-index:1;display:flex;flex-direction:column;
+.app{position:fixed;left:0;right:0;top:0;bottom:0;z-index:1;display:flex;flex-direction:column;overflow:hidden;
   padding-top:calc(var(--sat) + 6px);padding-inline:16px;max-width:600px;margin:0 auto}
 
 /* barre du haut */
@@ -81,19 +80,19 @@ body[data-mode="speak"] .aurora i:nth-child(1){opacity:.7}
 
 /* cœur holographique */
 .hero{flex:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding-block:2px 6px}
-.timeline{display:flex;align-items:baseline;gap:10px;font-variant-numeric:tabular-nums}
-.clock{font-family:var(--display);font-weight:600;font-size:clamp(26px,min(8vw,4.2vh),40px);letter-spacing:.02em;
+.timeline{display:flex;flex-wrap:wrap;justify-content:center;align-items:baseline;column-gap:10px;row-gap:0;max-width:100%;font-variant-numeric:tabular-nums}
+.clock{font-family:var(--display);font-weight:600;font-size:clamp(24px,8vw,36px);letter-spacing:.02em;
   background:linear-gradient(180deg,#fff 20%,#9FDFFF 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 .clock .sec{font-size:.42em;color:var(--dim);-webkit-text-fill-color:var(--dim);margin-left:3px}
 .date{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--dim);text-transform:capitalize}
-.core{position:relative;width:min(70vw,31vh,300px);aspect-ratio:1;border:0;background:none;padding:0;display:block;border-radius:50%;margin-top:-2px}
+.core{position:relative;width:var(--core,min(62vw,28vh,260px));max-width:100%;aspect-ratio:1;border:0;background:none;padding:0;display:block;border-radius:50%;margin-top:-2px}
 .core:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}
 .core canvas{position:absolute;inset:-8%;width:116%;height:116%}
 .state{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);margin-top:-6px}
 body[data-mode="listen"] .state{color:var(--magenta)}
 body[data-mode="think"] .state{color:var(--violet)}
 body[data-mode="speak"] .state{color:var(--cyan)}
-.live{margin:4px 0 0;min-height:2.9em;max-height:4.4em;overflow:hidden;text-align:center;font-size:15px;line-height:1.45;color:var(--text);
+.live{margin:4px 0 0;height:4.35em;flex:none;overflow:hidden;text-align:center;font-size:15px;line-height:1.45;color:var(--text);
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;width:100%;text-wrap:balance}
 .live.heard{color:var(--magenta);font-family:var(--mono);font-size:13px}
 
@@ -178,7 +177,8 @@ form.ask input::placeholder{color:var(--dim)}
 .tab .badge{color:var(--magenta)}
 .tab[aria-selected="true"] .badge{color:#05040F}
 body.typing .tabs{display:none}
-body.typing .core{width:min(28vw,100px)}
+body.typing .core{width:min(24vw,88px)}
+body.typing .live{height:2.9em;-webkit-line-clamp:2}
 body.typing .timeline,body.typing .state{display:none}
 
 /* réglages */
@@ -200,6 +200,13 @@ body.typing .timeline,body.typing .state{display:none}
 .install b{color:var(--magenta)}
 .ver{font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center}
 
+/* petits écrans (iPhone SE, mini…) */
+.compact .timeline .date{display:none}
+.compact .live{height:2.9em;-webkit-line-clamp:2}
+.compact .status{height:34px}
+.compact .tab{padding:8px 0}
+.compact form.ask{margin-top:4px}
+.app *{min-width:0}
 @media (prefers-reduced-motion: reduce){ .dot,.aurora i,.mic.on{animation:none} }
 </style>
 </head>
@@ -368,7 +375,7 @@ body.typing .timeline,body.typing .state{display:none}
 
 <script>
 "use strict";
-const VERSION = "2.3";
+const VERSION = "2.4";
 const $ = s => document.querySelector(s);
 const log = document.getElementById("log");
 const pad = n => String(n).padStart(2,"0");
@@ -386,17 +393,40 @@ function scrollChat(){ const p = $("#pane-chat"); requestAnimationFrame(() => { 
 window.addEventListener("error", e => { addMsg("sys", "⚠ Erreur : "+(e.message||"inconnue")); resetState(); });
 window.addEventListener("unhandledrejection", e => { addMsg("sys", "⚠ Erreur : "+((e.reason && e.reason.message) || e.reason || "inconnue")); resetState(); });
 
-/* ============ Écran fixe (comme une app) ============ */
+/* ============ Écran fixe, adapté automatiquement au téléphone ============ */
+const probe = document.createElement("div");
+probe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
+document.body.append(probe);
+function screenInfo(){
+  const cs = getComputedStyle(probe);
+  return { w: Math.round(innerWidth), h: Math.round(innerHeight), top: parseFloat(cs.paddingTop)||0, bottom: parseFloat(cs.paddingBottom)||0 };
+}
+// Taille de la sphère = ce qui reste une fois tout le reste placé.
+function layout(){
+  const app = $("#app"), H = app.clientHeight, W = app.clientWidth, core = $("#core"), panes = document.querySelector(".panes");
+  if (!H || !W) return;
+  document.documentElement.classList.toggle("compact", H < 700);
+  if (document.body.classList.contains("typing")) return;
+  const others = H - panes.offsetHeight - core.offsetHeight;   // barre, heure, texte, saisie, onglets
+  const minPane = H < 700 ? 140 : 200;                          // place minimale pour la conversation
+  let size = Math.min(300, (W - 32) * 0.8, H - others - minPane);
+  size = Math.max(96, Math.floor(size));
+  if (Math.abs(size - core.offsetWidth) > 1) document.documentElement.style.setProperty("--core", size+"px");
+}
 function fit(){
-  const vv = window.visualViewport;
-  const h = vv ? vv.height : window.innerHeight;
-  document.documentElement.style.setProperty("--app-h", h+"px");
-  if (vv) $("#app").style.top = vv.offsetTop+"px";
+  const vv = window.visualViewport, app = $("#app");
+  // Clavier ouvert : l'app se place au-dessus du clavier au lieu de déborder.
+  const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  if (vv && kb > 80){ app.style.top = vv.offsetTop+"px"; app.style.bottom = kb+"px"; }
+  else { app.style.top = "0px"; app.style.bottom = "0px"; }
   window.scrollTo(0,0);
+  requestAnimationFrame(layout);
 }
 fit();
 if (window.visualViewport){ visualViewport.addEventListener("resize", fit); visualViewport.addEventListener("scroll", fit); }
 addEventListener("resize", fit); addEventListener("orientationchange", () => setTimeout(fit, 300));
+new ResizeObserver(() => requestAnimationFrame(layout)).observe($("#app"));
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => requestAnimationFrame(layout));
 // Bloque le zoom (pincement et double-toucher).
 ["gesturestart","gesturechange","gestureend"].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive:false }));
 let lastTouch = 0;
@@ -420,14 +450,15 @@ const DEFAULTS = { name:"Paul", about:"", provider:"gemini", gkey:"", gmodel:"ge
 let S = Object.assign({}, DEFAULTS, store.get("settings", {}));
 const isStandalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 if (!isStandalone && /iPhone|iPad/.test(navigator.userAgent)) $("#installHint").hidden = false;
-$("#ver").textContent = "Jarvis v"+VERSION+(isStandalone ? " · mode app" : " · mode navigateur");
+function paintVer(){ const i = screenInfo(); $("#ver").textContent = "Jarvis v"+VERSION+(isStandalone ? " · mode app" : " · mode navigateur")+" · écran "+i.w+"×"+i.h+" · marges "+i.top+"/"+i.bottom; }
+paintVer();
 
 function openSettings(){
   $("#s-name").value = S.name; $("#s-about").value = S.about; $("#s-key").value = S.key;
   $("#s-provider").value = S.provider; $("#s-gkey").value = S.gkey; $("#s-gmodel").value = S.gmodel; showProviderFields();
   $("#s-model").value = S.model; $("#s-cal").value = S.cal; $("#s-secret").value = S.secret;
   $("#s-speak").value = S.speak; fillVoices(); $("#s-voice").value = S.voice;
-  $("#settingsMsg").textContent = ""; $("#sheet").hidden = false;
+  $("#settingsMsg").textContent = ""; paintVer(); $("#sheet").hidden = false;
 }
 function readSettings(){
   return { name: $("#s-name").value.trim() || "Paul", about: $("#s-about").value.trim(), key: $("#s-key").value.trim(),
